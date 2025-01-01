@@ -35,7 +35,7 @@ This shows that Sanders is more popular among Latinos who do not trace their anc
 
 While this data shows a statistically significant effect of having roots in communist countries, it misses the bigger picture that this could simply be a product of Cuban Americans that are more conservative than other Latin Americans. We can get around this by controlling for party affiliation of the respondents. Looking at party identification, going we can see that there much more strong democratic leaning Latino Americans with roots in non-communist countries.
 
-# Controlling for Party Identification
+### Controlling for Party Identification
 
 <img src="ComPartyDist.png" alt="Party Identification for Communist group" width="500"/>
 
