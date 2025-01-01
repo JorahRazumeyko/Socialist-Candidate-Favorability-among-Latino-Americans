@@ -1,0 +1,582 @@
+---
+title: "Favorability of Socialist Candidates Among Latino Voters Who Trace Their Ancestry to Communist Countries"
+author: "Jorah Razumeyko"
+date: "2024-12-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
+library(Rmisc)
+library(gt)
+library(webshot2)
+```
+## Abstract:
+  This project seeks to determine if a socialist candidate is less popular among Latino Americans who trace their ancestry back to communist countries. We find that such Americans are less favorable of candidates running as "socialist" by looking at the favorability of Bernie Sanders among Latino Americans with different backgrounds.  
+
+## Introduction:
+  Some have argued that it is best to avoid running a candidate who accepts the label of "socialist as it may drive down turnout among Latino Americans who disapprove of socialism. This argument assumes that those who trace their ancestry back to Cuba, Venezuela, and Nicaragua, which have had a history of socialist government policies, will be less likely to support a socialist candidate.
+
+## Data:
+  We can test this by looking at the [2016 Collaborative Multiracial Post-Election Survey data](https://doi.org/10.3886/ICPSR38040.v2) (CMPS), which asked Latino American respondents "To what country do you or your family trace your ancestry?", resulting in over 3000 responses. Using this we can group together respondents that chose Cuba, Venezuela, and Nicaragua as our "communist-roots" group and all other Latino American respondents as our "non-communist-roots" group. 
+
+  We can pair this with question asking if a respondent has a "favorable view or unfavorable view of Bernie Sanders", who ran as a Democratic Socialist during the Democratic Presidential primary.
+
+```{r, echo = FALSE}
+# code to load original data
+# #loading in CMPS data
+
+# Full_CMPS <- read.csv("CMPS2016_working.csv")
+# nrow(Full_CMPS)
+
+# #subset of just Latino respondents
+# Latino_Respondents <- Full_CMPS[!is.na(Full_CMPS$latino_group_identity), ]
+
+# #Smaller data frame with only necessary variables
+# truncated <- Latino_Respondents[, c("pid7", "s10", "c2", "c4", "c8")] 
+
+# #grouping together as communist and non communist
+# truncated$roots <- "Non-Communist"
+# truncated$roots[truncated$s10 %in% c("Cuba", "Venezuela", "Nicaragua")] <- "Communist"
+# truncated$roots <- factor(truncated$roots, levels = c("Non-Communist", "Communist"))
+
+
+# write.csv(truncated, file = "truncated.csv", row.names = FALSE)
+
+```
+
+
+
+```{r, echo = FALSE}
+#loading in CMPS data
+
+
+truncated <- read.csv("truncated.csv")
+
+
+
+#colors
+blue <- rgb(79/255, 148/255, 207/255)
+orange <- rgb(255/255, 139/255, 0)
+
+#ancestry data as table 
+root_table <- sort(table(truncated$roots), decreasing = TRUE)
+perc <- (root_table / sum(root_table)) * 100
+
+#percentage of responses bar plot
+barplot(height = perc,
+        names.arg = names(root_table),
+        col = blue,
+        main = "How many Latino voters have roots in Communist Countries\nand how many do not",
+        ylab = "Percentage of Responses",
+        ylim = c(0, 100)
+        
+)
+
+```
+
+## Results
+
+Using these two groups we can compare how favorability of Bernie Sanders differs for Latino Americans.
+
+```{r, echo = FALSE}
+#excluding respondents unfamiliar with Bernie Sanders and ordering responses
+
+fav <- subset(truncated, c8 != "Not famili")
+
+columns <- c("c8")
+
+# Define the replacements
+replacements <- list(
+  "Very unfav" = 1,
+  "Somewhat u" = 2,
+  "Somewhat f" = 3,
+  "Very favor" = 4
+)
+
+# Apply lapply for recoding
+fav[columns] <- as.data.frame(lapply(fav[columns], function(column) {
+  recode(column, !!!replacements)
+}))
+
+
+#separating the data into two groups for further analysis:
+
+communist_data <- fav[fav$roots == "Communist", ]
+
+non_communist_data <- fav[fav$roots == "Non-Communist", ]
+
+# count and percentage calculation
+communist_table <- table(communist_data$c8)
+
+non_communist_table <- table(non_communist_data$c8)
+
+
+communist_perc <- (communist_table / sum(communist_table)) * 100
+non_communist_perc <- (non_communist_table / sum(non_communist_table)) * 100
+
+# Plot the Communist data
+barplot(communist_perc,
+        col = orange,
+        main = "Majority of Latino voters with roots in Communist Countries\n have a favorable view of Bernie Sanders",
+        ylab = "Percentage of Responses",
+        ylim = c(0, 40),
+        names.arg = c("Very \n Unfavorable",  "Somewhat \n Unfavorable", "Somewhat \n favorable","Very \n favorable" ))
+
+
+# Plot the Non-Communist data
+barplot(non_communist_perc,
+        col = blue,
+        main = "Strong Majority of Latino voters with roots in Non-Communist \n Countries have a favorable view of Bernie Sanders",
+        ylab = "Percentage of Responses",
+        ylim = c(0, 40),
+        names.arg = c("Very \n Unfavorable",  "Somewhat \n Unfavorable", "Somewhat \n favorable","Very \n favorable" ))
+
+
+```
+
+This shows that Sanders is more popular among Latinos who do not trace their ancestry to Cuba, Niceragua, and Venezuala. We can test the significance by running a regression
+
+
+```{r,echo = FALSE}
+#Sanders Approval
+
+# Convert to specified levels
+fav$roots <- factor(fav$roots, levels = c("Non-Communist", "Communist"))
+fav$roots <- relevel(factor(fav$roots), ref = "Non-Communist")
+
+# Fit the linear model using the dummy variables
+fav_model <- lm(c8 ~ roots, data = fav)
+
+
+# create table
+coefficients_df <- as.data.frame(summary(fav_model)$coefficients)
+coefficients_df <- cbind(Term = rownames(coefficients_df), coefficients_df)
+rownames(coefficients_df) <- NULL  # Remove row names
+
+colnames(coefficients_df) <- c("Term", "Estimate", "Std. Error", "t value", "Pr(>|t|)")
+
+
+
+gt(coefficients_df) %>%
+  tab_header(
+    title = "Model Coefficients",
+    subtitle = "Summary of Linear Regression Model"
+  ) %>%
+  fmt_number(
+    columns = c("Estimate", "Std. Error", "t value", "Pr(>|t|)"),
+    decimals = 3
+  )
+
+
+
+
+# Get predictions from the model with confidence intervals
+predictions <- predict(fav_model, interval = "confidence")
+
+fav$fit <- predictions[, "fit"]
+fav$lwr <- predictions[, "lwr"]
+fav$upr <- predictions[, "upr"]
+
+
+# Create the plot
+ggplot(fav, aes(x = roots, y = fit)) +
+  geom_point(color = "blue", size = 3) + 
+  geom_errorbar(aes(ymin = lwr, ymax = upr), width = 0.2, color = "black") +  
+   ylim(1, 4) +
+  labs(
+    x = "Countries to which respondents trace their roots to",
+    y = "Average Sanders Approval \n (ranging from 1 = Very Unfavorable to 4 = Very favorable)",
+    title = "Latinos on average have a favorable view of Sanders, but those \n with roots in Non-Communist countries have a more favorable view"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(size = 12),
+        axis.title.x = element_text(size = 14),
+        axis.title.y = element_text(size = 10)) 
+
+```
+
+
+While this data shows a statistically significant effect of having roots in communist countries, it misses the bigger picture that this could simply be a product of Cuban Americans that are more conservative than other Latin Americans. We can get around this by controlling for party affiliation of the respondents. Looking at party identification, going we can see that there much more strong democratic leaning Latino Americans with roots in non-communist countries.
+
+
+```{r, echo = FALSE}
+#Controlling for party affiliation
+# count and percentage calculation
+
+fav$pid7 <- as.factor(fav$pid7)
+communist_table <- table(communist_data$pid7)
+
+
+non_communist_table <- table(non_communist_data$pid7)
+
+
+communist_perc <- (communist_table / sum(communist_table)) * 100
+non_communist_perc <- (non_communist_table / sum(non_communist_table)) * 100
+
+fav_model <- lm(c8 ~ pid7, data = fav)
+
+
+# model for Communist group
+fav_communist <- subset(fav, roots == "Communist")
+fav_model_communist <- lm(c8 ~ pid7, data = fav_communist)
+
+# model for Non-Communist group
+fav_non_communist <- subset(fav, roots == "Non-Communist")
+fav_model_non_communist <- lm(c8 ~ pid7, data = fav_non_communist)
+
+# predictions for Communist group
+predictions_communist <- predict(fav_model_communist, interval = "confidence")
+fav_communist$fit <- predictions_communist[, "fit"]
+fav_communist$lwr <- predictions_communist[, "lwr"]
+fav_communist$upr <- predictions_communist[, "upr"]
+
+# predictions for Non-Communist group
+predictions_non_communist <- predict(fav_model_non_communist, interval = "confidence")
+fav_non_communist$fit <- predictions_non_communist[, "fit"]
+fav_non_communist$lwr <- predictions_non_communist[, "lwr"]
+fav_non_communist$upr <- predictions_non_communist[, "upr"]
+
+
+# Plot the Communist data
+barplot(communist_perc,
+        col = orange,
+        main = "Party Identification among the Communist Countries group \n is more uniformly distributed between each identification",
+        ylab = "Percentage of Responses",
+        ylim = c(0, 30),
+        names.arg = c("SD", "D", "LD", "I", "LR", "R", "SR"))
+
+
+# Plot the Non-Communist data
+barplot(non_communist_perc,
+        col = blue,
+        main = "Party Identification among the Non-Communist Countries group is \n skewed left with a considerable number of independents",
+        ylab = "Percentage of Responses",
+        ylim = c(0, 30),
+        names.arg = c("SD", "D", "LD", "I", "LR", "R", "SR"))
+
+
+# Combine both groups back into one dataset
+fav_combined <- rbind(fav_communist, fav_non_communist)
+
+# Create the plot
+ggplot(fav_combined, aes(x = pid7, y = fit, color = roots)) +
+  geom_point(size = 1,  position = position_dodge(width = 0.4)) +  # Points for predicted values
+  geom_errorbar(aes(ymin = lwr, ymax = upr), width = 0.2, position = position_dodge(width = 0.4)) +
+  ylim(1, 4) +  # Adjust y-axis range
+  labs(
+    x = "Party Identification from Strong Democrat to Strong Republican", 
+    y = "Average Sanders Approval \n (ranging from 1 = Very Unfavorable to 4 = Very favorable)", 
+    title = "Approval of Sanders does not vary between Communist and non-Communist \n to a statistically significant extent within each party identification group"
+  ) +
+  scale_x_discrete(labels = c("SD", "D", "LD", "I", "LR", "R", "SR")) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(size = 12),
+    axis.title.x = element_text(size = 14),
+    axis.title.y = element_text(size = 10),
+    legend.title = element_blank(),  # Remove legend title
+    legend.position = "top"  # Place legend at top
+  ) +
+  scale_color_manual(values = c("blue", "red"))  # Customize colors for each group
+
+
+
+
+
+```
+
+If we use party identification data to predict the approal of Sanders, we can see that there is not enough data to determine that they are less popular among Latino Americans with roots in Communist or Socialist countries.
+
+However, it can be useful to compare it to other candidates to see if there is any difference for other politicians. 
+
+
+
+```{r, echo = FALSE}
+#Obama Approval
+favc <- subset(truncated, c2 != "Not famili")
+
+columns <- c("c2")
+
+# Define the replacements
+replacements <- list(
+  "Very unfav" = 1,
+  "Somewhat u" = 2,
+  "Somewhat f" = 3,
+  "Very favor" = 4
+)
+
+# Apply lapply for recoding
+favc[columns] <- as.data.frame(lapply(favc[columns], function(column) {
+  recode(column, !!!replacements)
+}))
+
+favc$roots <- relevel(factor(favc$roots), ref = "Non-Communist")
+
+# count and percentage calculation
+
+favc$pid7 <- as.factor(favc$pid7)
+
+
+# model for Communist group
+favc_communist <- subset(favc, roots == "Communist")
+favc_model_communist <- lm(c2 ~ pid7, data = favc_communist)
+
+# model for Non-Communist group
+favc_non_communist <- subset(favc, roots == "Non-Communist")
+favc_model_non_communist <- lm(c2 ~ pid7, data = favc_non_communist)
+
+# predictions for Communist group
+predictions_communist <- predict(favc_model_communist, interval = "confidence")
+favc_communist$fit <- predictions_communist[, "fit"]
+favc_communist$lwr <- predictions_communist[, "lwr"]
+favc_communist$upr <- predictions_communist[, "upr"]
+
+# predictions for Non-Communist group
+predictions_non_communist <- predict(favc_model_non_communist, interval = "confidence")
+favc_non_communist$fit <- predictions_non_communist[, "fit"]
+favc_non_communist$lwr <- predictions_non_communist[, "lwr"]
+favc_non_communist$upr <- predictions_non_communist[, "upr"]
+
+# Combined groups
+favc_combined <- rbind(favc_communist, favc_non_communist)
+
+
+# Create the plot
+ggplot(favc_combined, aes(x = pid7, y = fit, color = roots)) +
+  geom_point(size = 1,  position = position_dodge(width = 0.4)) +  # Points for predicted values
+  geom_errorbar(aes(ymin = lwr, ymax = upr), width = 0.2, position = position_dodge(width = 0.4)) +
+  ylim(1, 4.1) +  # Adjust y-axis range
+  labs(
+    x = "Party Identification from Strong Democrat to Strong Republican", 
+    y = "Average Obama Approval \n (ranging from 1 = Very Unfavorable to 4 = Very favorable)", 
+    title = "Approval of Obama is almost identical fo Communist and Non-Communist \n within each party identification"
+  ) +
+  scale_x_discrete(labels = c("SD", "D", "LD", "I", "LR", "R", "SR")) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(size = 12),
+    axis.title.x = element_text(size = 14),
+    axis.title.y = element_text(size = 10),
+    legend.title = element_blank(),  # Remove legend title
+    legend.position = "top"  # Place legend at top
+  ) +
+  scale_color_manual(values = c("blue", "red"))  # Customize colors for each group
+
+
+
+
+
+```
+
+Looking at Obama we can see that the difference in expected approval for each party identification is much closer to being the same for a non-socialist candidate than is the case for Bernie Sanders. It should be noted that although Sanders seems to be less popular than Obama among Latino Americans with roots in Non-Communist countries, they are still more popular than Hillary Clinton among Latinos, regardless of party affiliation or where they trace their ancestry too.
+
+## Conclusion
+
+While this data is insufficient to determine if there is a statistically significant difference between the approval of socialist candidates among Latino Americans who trace their ancestry to Cuba, Venezuala, and Nicaragua, and those who do not, it does show that it should be further investigated. 
+
+By controlling for party affiliation, the difference in approval of the Democratic Socialist Candidate Bernie Sanders is insignificant, however, a larger sample size could narrow the confidence interval to provide clear results. Furthermore, since the survey did not control for age, it is possible that young Americans, who were more supportive of Bernie Sanders in 2016, but do not vote in high proportions made the data more mixed. Subsequent research could add age control or weigh each response by average voter turnout for that age group to make the predictions of favorability more significant and accurate.
+
+It should be noted that while that even if the difference were statistically significant, it is possible for a Socialist Candidate like Bernie Sanders to poll higher with Latino Americans of any ancestry than a non-socialist candidate would. This is exemplified in the appendix by the fact that the average favorability of Sanders was higher for both groups and all party identifications than for Clinton.
+
+
+## Appendix
+
+```{r, echo = FALSE}
+#Clinton Approval
+favc <- subset(truncated, c4 != "Not famili")
+
+columns <- c("c4")
+
+# Define the replacements
+replacements <- list(
+  "Very unfav" = 1,
+  "Somewhat u" = 2,
+  "Somewhat f" = 3,
+  "Very favor" = 4
+)
+
+# Apply lapply for recoding
+favc[columns] <- as.data.frame(lapply(favc[columns], function(column) {
+  recode(column, !!!replacements)
+}))
+
+# count and percentage calculation
+favc$roots <- relevel(factor(favc$roots), ref = "Non-Communist")
+
+favc$pid7 <- as.factor(favc$pid7)
+
+
+# model for Communist group
+favc_communist <- subset(favc, roots == "Communist")
+favc_model_communist <- lm(c4 ~ pid7, data = favc_communist)
+
+# model for Non-Communist group
+favc_non_communist <- subset(favc, roots == "Non-Communist")
+favc_model_non_communist <- lm(c4 ~ pid7, data = favc_non_communist)
+
+# predictions for Communist group
+predictions_communist <- predict(favc_model_communist, interval = "confidence")
+favc_communist$fit <- predictions_communist[, "fit"]
+favc_communist$lwr <- predictions_communist[, "lwr"]
+favc_communist$upr <- predictions_communist[, "upr"]
+
+# predictions for Non-Communist group
+predictions_non_communist <- predict(favc_model_non_communist, interval = "confidence")
+favc_non_communist$fit <- predictions_non_communist[, "fit"]
+favc_non_communist$lwr <- predictions_non_communist[, "lwr"]
+favc_non_communist$upr <- predictions_non_communist[, "upr"]
+
+# Combined groups
+favc_combined <- rbind(favc_communist, favc_non_communist)
+
+
+# Create the plot
+ggplot(favc_combined, aes(x = pid7, y = fit, color = roots)) +
+  geom_point(size = 1,  position = position_dodge(width = 0.4)) +  # Points for predicted values
+  geom_errorbar(aes(ymin = lwr, ymax = upr), width = 0.2, position = position_dodge(width = 0.4)) +
+  ylim(1, 4.1) +  # Adjust y-axis range
+  labs(
+    x = "Party Identification from Strong Democrat to Strong Republican", 
+    y = "Average Clinton  Approval \n (ranging from 1 = Very Unfavorable to 4 = Very favorable)", 
+    title = "Approval of Clinton is almost identical for Communist and Non-Communist \n within each party identification"
+  ) +
+  scale_x_discrete(labels = c("SD", "D", "LD", "I", "LR", "R", "SR")) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(size = 12),
+    axis.title.x = element_text(size = 14),
+    axis.title.y = element_text(size = 10),
+    legend.title = element_blank(),  # Remove legend title
+    legend.position = "top"  # Place legend at top
+  ) +
+  scale_color_manual(values = c("blue", "red"))  # Customize colors for each group
+```
+
+The data suggests that although Hillary Clinton polls at roughly the same amount with Latinos from all poltical identity responses in contrast to Bernie Sanders, Sanders still has a higher average approval from all political party affiliations. 
+
+
+```{r, echo = FALSE}
+
+#bootstrap
+
+
+set.seed(1)
+n_bootstrap <- 5000
+
+# Bootstrap function to get predictions
+bootstrap_predictions <- function(data, n_bootstrap) {
+  # Create a container to store predictions
+  prediction_list <- vector("list", n_bootstrap)
+  
+  for (i in 1:n_bootstrap) {
+    # Resample data
+    resampled_data <- data[sample(1:nrow(data), replace = TRUE), ]
+    
+    # Fit the model
+    b_model <- lm(c8 ~ pid7, data = resampled_data)
+    
+    # Predict for all levels of pid7
+    prediction_list[[i]] <- predict(
+      b_model, 
+      newdata = data.frame(pid7 = levels(data$pid7))
+    )
+  }
+  
+  # Combine predictions into a matrix
+  prediction_matrix <- do.call(cbind, prediction_list)
+  
+  # Calculate summary statistics
+  summary_stats <- apply(prediction_matrix, 1, function(x) {
+    c(mean = mean(x), lwr = quantile(x, 0.025), upr = quantile(x, 0.975))
+  })
+  
+  # Return as a data frame
+  summary_df <- as.data.frame(t(summary_stats))
+  summary_df$pid7 <- levels(data$pid7)  # Add pid7 levels
+  return(summary_df)
+}
+
+# Run bootstrap for Communist and Non-Communist groups
+
+
+summary_communist <- bootstrap_predictions(fav_communist, n_bootstrap)
+summary_communist$roots <- "Communist"
+
+
+
+summary_non_communist <- bootstrap_predictions(fav_non_communist, n_bootstrap)
+summary_non_communist$roots <- "Non-Communist"
+
+
+# Combine summaries
+combined <- rbind(summary_non_communist, summary_communist)
+
+# Convert pid7 to factor
+combined$pid7 <- factor(combined$pid7)
+combined$roots <- relevel(factor(combined$roots), ref = "Non-Communist")
+
+# Rename columns in the combined data frame
+colnames(combined)[colnames(combined) == "lwr.2.5%"] <- "lwr"
+colnames(combined)[colnames(combined) == "upr.97.5%"] <- "upr"
+
+
+
+```
+
+```{r, echo = FALSE}
+
+# Plot using bootstrap data
+ggplot(combined, aes(x = pid7, y = mean, color = roots)) +
+  geom_point(size = 1, position = position_dodge(width = 0.4)) +  # Points for predicted values
+  geom_errorbar(aes(ymin = lwr, ymax = upr), width = 0.2, position = position_dodge(width = 0.4)) +
+  ylim(1, 4) +  # Adjust y-axis range
+  labs(
+    x = "Party Identification from Strong Democrat to Strong Republican", 
+    y = "Average Sanders Approval \n (ranging from 1 = Very Unfavorable to 4 = Very favorable)", 
+    title = "Approval of Sanders does not vary between Communist and non-Communist \n to a statistically significant extent within each party identification group"
+  ) +
+  scale_x_discrete(labels = c("SD", "D", "LD", "I", "LR", "R", "SR")) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(size = 12),
+    axis.title.x = element_text(size = 14),
+    axis.title.y = element_text(size = 10),
+    legend.title = element_blank(),  # Remove legend title
+    legend.position = "top"  # Place legend at top
+  ) +
+  scale_color_manual(values = c("blue", "red"))  # Customize colors for each group
+
+
+```
+
+While bootstrapping does narrow the confidence interval, the findings are still statistically insignificant.
+
+
+```{r, echo = FALSE}
+# Calculating effect of bootstrap
+combined$ci <- combined$upr - combined$lwr
+fav_combined$ci <- fav_combined$upr - fav_combined$lwr
+# Merge based on pid7 and roots
+comparison <- merge(
+  combined[, c("pid7", "roots", "ci")], 
+  fav_combined[, c("pid7", "roots", "ci")], 
+  by = c("pid7", "roots"), 
+  suffixes = c("_bootstrap", "_original")
+)
+
+comparison$ci_change <- (1 -comparison$ci_bootstrap/comparison$ci_original)*100
+
+unique_comparison <- comparison[!duplicated(comparison$ci_bootstrap), ]
+
+unique_comparison
+
+```
+
+The bootstrap does not have a uniform effect on confidence interval for the predicted favorability.
+
+
+
+
